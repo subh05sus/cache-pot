@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/subh05sus/cache-pot/internal/pubsub"
 	"github.com/subh05sus/cache-pot/internal/resp"
@@ -19,15 +21,54 @@ type respWriter = *resp.Writer
 // delivery runs on a separate goroutine concurrently with command replies.
 type conn struct {
 	s   *Server
-	nc  net.Conn
+	nc  net.Conn // nil for virtual connections (AOF replay, dashboard Execute)
 	r   *resp.Reader
 	w   *resp.Writer
 	wmu sync.Mutex
 
 	authed bool
 
+	// Client-registry identity (CLIENT LIST / dashboard Clients page).
+	id      uint64
+	created time.Time
+	kind    string // "tcp", "dashboard", "aof-replay"
+
+	// metamu guards the mutable metadata below, which CLIENT LIST reads from
+	// other goroutines while dispatch updates it.
+	metamu     sync.Mutex
+	name       string
+	lastCmd    string
+	lastActive time.Time
+
+	// monitoring is set while this connection is in MONITOR mode; monSub is
+	// its feed, cleaned up on disconnect.
+	monitoring atomic.Bool
+	monSub     *monitorSub
+
+	// aofCmds, when set by a handler, replaces what dispatch would log to the
+	// AOF for the current command. An empty (non-nil) slice suppresses logging.
+	// Reset by dispatchCommand before every command.
+	aofCmds [][]string
+
 	submu sync.Mutex
 	subs  map[string]*pubsub.Subscription
+	psubs map[string]*pubsub.Subscription
+}
+
+// noteCommand records the command name and activity time for CLIENT LIST.
+func (c *conn) noteCommand(name string) {
+	c.metamu.Lock()
+	c.lastCmd = name
+	c.lastActive = time.Now()
+	c.metamu.Unlock()
+}
+
+// addr returns the remote address, or the connection kind for virtual conns.
+func (c *conn) addr() string {
+	if c.nc != nil {
+		return c.nc.RemoteAddr().String()
+	}
+	return c.kind
 }
 
 // serveConn runs the read/dispatch loop for a single client connection.
@@ -38,13 +79,18 @@ func (s *Server) serveConn(ctx context.Context, nc net.Conn) {
 	defer s.stats.Connections.Add(-1)
 
 	c := &conn{
-		s:      s,
-		nc:     nc,
-		r:      resp.NewReader(nc),
-		w:      resp.NewWriter(nc),
-		subs:   make(map[string]*pubsub.Subscription),
-		authed: s.cfg.Password == "",
+		s:       s,
+		nc:      nc,
+		r:       resp.NewReader(nc),
+		w:       resp.NewWriter(nc),
+		subs:    make(map[string]*pubsub.Subscription),
+		psubs:   make(map[string]*pubsub.Subscription),
+		authed:  s.cfg.Password == "",
+		kind:    "tcp",
+		created: time.Now(),
 	}
+	s.registerClient(c)
+	defer s.deregisterClient(c)
 	defer c.unsubscribeAll()
 
 	for {
@@ -137,5 +183,9 @@ func (c *conn) unsubscribeAll() {
 	for ch, sub := range c.subs {
 		c.s.broker.Unsubscribe(sub)
 		delete(c.subs, ch)
+	}
+	for p, sub := range c.psubs {
+		c.s.broker.Unsubscribe(sub)
+		delete(c.psubs, p)
 	}
 }

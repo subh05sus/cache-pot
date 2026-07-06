@@ -28,16 +28,36 @@ func (s *Server) registerCommands() {
 		"SAVE":     (*conn).cmdSave,
 		"BGSAVE":   (*conn).cmdSave,
 
+		"BGREWRITEAOF": (*conn).cmdRewriteAOF,
+
 		// generic keyspace
-		"DEL":     (*conn).cmdDel,
-		"EXISTS":  (*conn).cmdExists,
-		"EXPIRE":  (*conn).cmdExpire,
-		"PEXPIRE": (*conn).cmdPExpire,
-		"TTL":     (*conn).cmdTTL,
-		"PTTL":    (*conn).cmdPTTL,
-		"PERSIST": (*conn).cmdPersist,
-		"KEYS":    (*conn).cmdKeys,
-		"TYPE":    (*conn).cmdType,
+		"DEL":       (*conn).cmdDel,
+		"EXISTS":    (*conn).cmdExists,
+		"EXPIRE":    (*conn).cmdExpire,
+		"PEXPIRE":   (*conn).cmdPExpire,
+		"EXPIREAT":  (*conn).cmdExpireAt,
+		"PEXPIREAT": (*conn).cmdPExpireAt,
+		"TTL":      (*conn).cmdTTL,
+		"PTTL":     (*conn).cmdPTTL,
+		"PERSIST":  (*conn).cmdPersist,
+		"KEYS":     (*conn).cmdKeys,
+		"TYPE":     (*conn).cmdType,
+		"RENAME":   (*conn).cmdRename,
+		"RENAMENX": (*conn).cmdRenameNX,
+
+		// keyspace introspection
+		"SCAN":   (*conn).cmdScan,
+		"HSCAN":  (*conn).cmdHScan,
+		"SSCAN":  (*conn).cmdSScan,
+		"ZSCAN":  (*conn).cmdZScan,
+		"MEMORY": (*conn).cmdMemory,
+		"CONFIG": (*conn).cmdConfig,
+
+		// observability
+		"CLIENT":  (*conn).cmdClient,
+		"SLOWLOG": (*conn).cmdSlowlog,
+		"MONITOR": (*conn).cmdMonitor,
+		"RESET":   (*conn).cmdReset,
 
 		// strings
 		"GET":      (*conn).cmdGet,
@@ -90,9 +110,11 @@ func (s *Server) registerCommands() {
 		"ZRANGEBYSCORE": (*conn).cmdZRangeByScore,
 
 		// pub/sub
-		"SUBSCRIBE":   (*conn).cmdSubscribe,
-		"UNSUBSCRIBE": (*conn).cmdUnsubscribe,
-		"PUBLISH":     (*conn).cmdPublish,
+		"SUBSCRIBE":    (*conn).cmdSubscribe,
+		"UNSUBSCRIBE":  (*conn).cmdUnsubscribe,
+		"PSUBSCRIBE":   (*conn).cmdPSubscribe,
+		"PUNSUBSCRIBE": (*conn).cmdPUnsubscribe,
+		"PUBLISH":      (*conn).cmdPublish,
 
 		// vector store
 		"VSET":    (*conn).cmdVSet,
@@ -138,7 +160,9 @@ func (c *conn) cmdEcho(args []string) error {
 func (c *conn) cmdQuit(args []string) error {
 	c.writeSimple("OK")
 	c.flush()
-	c.nc.Close()
+	if c.nc != nil {
+		c.nc.Close()
+	}
 	return nil
 }
 
@@ -194,6 +218,18 @@ func (c *conn) cmdSave(args []string) error {
 	return c.writeSimple("OK")
 }
 
+// cmdRewriteAOF implements BGREWRITEAOF. The rewrite is synchronous — the
+// keyspace export read-locks each shard in turn, so the server keeps serving.
+func (c *conn) cmdRewriteAOF(args []string) error {
+	if c.s.cfg.AOF == nil {
+		return c.writeError("ERR AOF is disabled (no --aof-path configured)")
+	}
+	if err := c.s.cfg.AOF.Rewrite(c.s.store.Export()); err != nil {
+		return c.writeError("ERR " + err.Error())
+	}
+	return c.writeSimple("OK")
+}
+
 func (c *conn) cmdInfo(args []string) error {
 	st := c.s.stats
 	var b strings.Builder
@@ -201,6 +237,7 @@ func (c *conn) cmdInfo(args []string) error {
 		Version, runtime.Version(), int(c.s.Uptime().Seconds()))
 	fmt.Fprintf(&b, "# Clients\r\nconnected_clients:%d\r\ntotal_connections_received:%d\r\n",
 		st.Connections.Load(), st.TotalConns.Load())
+	fmt.Fprintf(&b, "# Persistence\r\naof_enabled:%d\r\n", boolToInt(c.s.cfg.AOF != nil))
 	fmt.Fprintf(&b, "# Keyspace\r\ndb0:keys=%d\r\n", c.s.store.DBSize())
 	fmt.Fprintf(&b, "# Stats\r\ntotal_commands_processed:%d\r\nsemantic_cache_hits:%d\r\nsemantic_cache_misses:%d\r\nsemantic_cache_hit_ratio:%.4f\r\n",
 		st.Commands.Load(), st.CacheHits.Load(), st.CacheMisses.Load(), st.HitRatio())
@@ -245,6 +282,24 @@ func (c *conn) cmdPExpire(args []string) error {
 	}
 	ok := c.s.store.Expire(args[1], time.Duration(ms)*time.Millisecond)
 	return c.writeInt(boolToInt(ok))
+}
+
+// cmdExpireAt implements EXPIREAT key unix-seconds.
+func (c *conn) cmdExpireAt(args []string) error { return c.expireAt(args, time.Second) }
+
+// cmdPExpireAt implements PEXPIREAT key unix-milliseconds.
+func (c *conn) cmdPExpireAt(args []string) error { return c.expireAt(args, time.Millisecond) }
+
+func (c *conn) expireAt(args []string, unit time.Duration) error {
+	if len(args) != 3 {
+		return c.wrongArgs(strings.ToLower(args[0]))
+	}
+	n, err := strconv.ParseInt(args[2], 10, 64)
+	if err != nil {
+		return c.writeError(store.ErrNotInteger.Error())
+	}
+	at := time.Unix(0, n*int64(unit))
+	return c.writeInt(boolToInt(c.s.store.ExpireAt(args[1], at)))
 }
 
 func (c *conn) cmdTTL(args []string) error  { return c.ttl(args, time.Second) }

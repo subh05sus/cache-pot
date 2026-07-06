@@ -58,9 +58,19 @@ func (c *conn) cmdSet(args []string) error {
 		}
 	}
 	if c.s.store.Set(key, val, opts) {
+		if opts.HasEx {
+			// Log the TTL as an absolute deadline so an AOF replay hours later
+			// doesn't resurrect the key for a fresh EX interval.
+			at := time.Now().Add(opts.TTL).UnixMilli()
+			c.aofCmds = [][]string{
+				{"SET", key, val},
+				{"PEXPIREAT", key, strconv.FormatInt(at, 10)},
+			}
+		}
 		return c.writeSimple("OK")
 	}
-	return c.writeNull() // NX/XX condition not met
+	c.aofCmds = [][]string{} // NX/XX condition not met: nothing to log
+	return c.writeNull()
 }
 
 func (c *conn) cmdGetSet(args []string) error {

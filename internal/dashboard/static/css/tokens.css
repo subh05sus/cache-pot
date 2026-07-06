@@ -1,0 +1,54 @@
+/* Cache-Pot console — design tokens.
+   Claude Code-inspired: warm near-black, terracotta accent, monospace
+   throughout. Data-mark colors are OKLCH-validated for the dark surface
+   (lightness band, chroma floor, CVD separation, contrast). */
+:root {
+  /* surfaces */
+  --bg: #1a1915;
+  --bg-raised: #23211b;
+  --bg-inset: #141310;
+  --bg-hover: #2b2921;
+  --border: #3a372e;
+  --border-strong: #4d4839;
+
+  /* ink */
+  --text: #e8e6e1;
+  --text-dim: #c4c0b6;
+  --muted: #9b9789;
+  --faint: #6e6a5e;
+
+  /* brand */
+  --accent: #d97757;        /* terracotta — chrome, links, active states */
+  --accent-strong: #c96442; /* data-mark grade terracotta */
+  --accent-dim: #8a4a32;
+  --accent-wash: rgba(217, 119, 87, 0.12);
+
+  /* status (reserved — never reused as series colors) */
+  --ok: #7cb87c;
+  --warn: #d9b457;
+  --err: #d97070;
+  --err-wash: rgba(217, 112, 112, 0.12);
+
+  /* validated categorical palette: Redis type badges & analysis bars */
+  --type-string: #c96442;
+  --type-hash: #5b8fd4;
+  --type-list: #55a355;
+  --type-set: #a06fd0;
+  --type-zset: #b3872a;
+  --type-vector: #2fa596;
+
+  /* type */
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12.5px;
+  --fs-md: 14px;
+  --fs-lg: 17px;
+  --fs-xl: 26px;
+
+  /* shape & rhythm */
+  --radius: 8px;
+  --radius-sm: 5px;
+  --gap: 12px;
+  --pad: 16px;
+  --sidebar-w: 208px;
+}

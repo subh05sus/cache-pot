@@ -3,11 +3,19 @@ package server
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/subh05sus/cache-pot/internal/client"
 	"github.com/subh05sus/cache-pot/internal/store"
+)
+
+// testServers lets tests recover the *Server behind a client connection
+// (startTestServer predates tests that need in-process access).
+var (
+	testServersMu sync.Mutex
+	testServers   = map[string]*Server{}
 )
 
 // startTestServer boots a server on an ephemeral port and returns a connected
@@ -23,6 +31,9 @@ func startTestServer(t *testing.T) (*client.Client, func()) {
 	ln.Close()
 
 	srv := New(store.New(), Config{Addr: addr})
+	testServersMu.Lock()
+	testServers[addr] = srv
+	testServersMu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	go srv.ListenAndServe(ctx)
 

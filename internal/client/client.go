@@ -6,11 +6,11 @@ package client
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/subh05sus/cache-pot/internal/resp"
 )
 
 // Client is a single synchronous connection to a Cache-Pot/Redis server. It is not
@@ -50,59 +50,46 @@ func (c *Client) Do(args ...string) (any, error) {
 	return c.readReply()
 }
 
+// ReadReply reads one server-pushed reply without sending a command — used
+// for MONITOR lines and pub/sub messages.
+func (c *Client) ReadReply() (any, error) { return c.readReply() }
+
+// SetReadDeadline bounds how long reads (Do, ReadReply) may block.
+func (c *Client) SetReadDeadline(t time.Time) error { return c.conn.SetReadDeadline(t) }
+
 func (c *Client) readReply() (any, error) {
-	prefix, err := c.r.ReadByte()
+	v, err := resp.ReadReply(c.r)
 	if err != nil {
 		return nil, err
 	}
-	line, err := c.readLine()
-	if err != nil {
-		return nil, err
-	}
-	switch prefix {
-	case '+':
-		return line, nil
-	case '-':
-		return fmt.Errorf("%s", line), nil
-	case ':':
-		return strconv.ParseInt(line, 10, 64)
-	case '$':
-		n, err := strconv.Atoi(line)
-		if err != nil {
-			return nil, err
-		}
-		if n < 0 {
-			return nil, nil
-		}
-		buf := make([]byte, n+2)
-		if _, err := io.ReadFull(c.r, buf); err != nil {
-			return nil, err
-		}
-		return string(buf[:n]), nil
-	case '*':
-		n, err := strconv.Atoi(line)
-		if err != nil {
-			return nil, err
-		}
-		if n < 0 {
-			return nil, nil
-		}
-		arr := make([]any, n)
-		for i := 0; i < n; i++ {
-			if arr[i], err = c.readReply(); err != nil {
-				return nil, err
-			}
-		}
-		return arr, nil
-	default:
-		return nil, fmt.Errorf("client: unknown reply type %q", prefix)
-	}
+	return valueToAny(v), nil
 }
 
-func (c *Client) readLine() (string, error) {
-	s, err := c.r.ReadString('\n')
-	if err != nil {
-		return "", err
+// valueToAny collapses a typed resp.Value into the loose shape this client
+// has always returned: string, int64, nil, []any, or error for RESP errors.
+func valueToAny(v resp.Value) any {
+	switch v.Kind {
+	case '+':
+		return v.Str
+	case '-':
+		return fmt.Errorf("%s", v.Str)
+	case ':':
+		return v.Int
+	case '$':
+		if v.Null {
+			return nil
+		}
+		return v.Str
+	case '*':
+		if v.Null {
+			return nil
+		}
+		arr := make([]any, len(v.Array))
+		for i, el := range v.Array {
+			arr[i] = valueToAny(el)
+		}
+		return arr
+	default:
+		return nil
 	}
-	return strings.TrimRight(s, "\r\n"), nil
 }

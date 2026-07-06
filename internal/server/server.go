@@ -7,8 +7,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/subh05sus/cache-pot/internal/embed"
 	"github.com/subh05sus/cache-pot/internal/persist"
 	"github.com/subh05sus/cache-pot/internal/pubsub"
+	"github.com/subh05sus/cache-pot/internal/resp"
 	"github.com/subh05sus/cache-pot/internal/store"
 )
 
@@ -24,6 +27,7 @@ type Config struct {
 	Addr        string // listen address, e.g. ":6379"
 	Password    string // optional AUTH password ("" disables auth)
 	Snapshotter *persist.Snapshotter
+	AOF         *persist.AOF // optional append-only file (nil disables it)
 	Embed       *embed.Client
 }
 
@@ -34,6 +38,10 @@ type Server struct {
 	broker  *pubsub.Broker
 	stats   *Stats
 	started time.Time
+
+	clientReg *clientRegistry
+	slowlog   *slowlog
+	monitor   *monitorHub
 
 	ln       net.Listener
 	wg       sync.WaitGroup
@@ -48,11 +56,14 @@ type handler func(c *conn, args []string) error
 // New builds a Server over the given store.
 func New(s *store.Store, cfg Config) *Server {
 	srv := &Server{
-		cfg:     cfg,
-		store:   s,
-		broker:  pubsub.NewBroker(),
-		stats:   &Stats{},
-		started: time.Now(),
+		cfg:       cfg,
+		store:     s,
+		broker:    pubsub.NewBroker(store.MatchPattern),
+		stats:     &Stats{},
+		started:   time.Now(),
+		clientReg: newClientRegistry(),
+		slowlog:   newSlowlog(),
+		monitor:   newMonitorHub(),
 	}
 	srv.registerCommands()
 	return srv
@@ -102,22 +113,161 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
-// dispatchCommand looks up and runs a command by name.
+// dispatchCommand looks up and runs a command by name, with three cheap
+// observation hooks: client metadata (CLIENT LIST), the monitor fan-out (one
+// atomic load when idle), and the slowlog timer (skipped entirely when the
+// threshold is -1).
 func (s *Server) dispatchCommand(c *conn, args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
 	s.stats.Commands.Add(1)
 	name := strings.ToUpper(args[0])
+	c.noteCommand(name)
+
+	// A monitoring connection accepts nothing but QUIT and RESET.
+	if c.monitoring.Load() && name != "QUIT" && name != "RESET" {
+		return c.writeError("ERR only QUIT and RESET are allowed while MONITOR is active")
+	}
 
 	// When not authenticated, only AUTH (and QUIT) are permitted.
 	if s.cfg.Password != "" && !c.authed && name != "AUTH" && name != "QUIT" {
 		return c.writeError("NOAUTH Authentication required.")
 	}
 
+	// Fan out to MONITOR consumers before execution; unknown commands appear
+	// too, matching Redis. Monitoring connections' own commands are not echoed.
+	if s.monitor.active.Load() && !c.monitoring.Load() {
+		s.publishMonitor(c, name, args)
+	}
+
 	h, ok := s.dispatch[name]
 	if !ok {
 		return c.writeError(fmt.Sprintf("ERR unknown command '%s'", args[0]))
 	}
-	return h(c, args)
+	c.aofCmds = nil
+
+	thresholdUs := s.slowlog.thresholdUs.Load()
+	var start time.Time
+	if thresholdUs >= 0 {
+		start = time.Now()
+	}
+	err := h(c, args)
+	if thresholdUs >= 0 {
+		if elapsed := time.Since(start); elapsed.Microseconds() >= thresholdUs {
+			c.metamu.Lock()
+			clientName := c.name
+			c.metamu.Unlock()
+			s.slowlog.record(args, elapsed, c.addr(), clientName)
+		}
+	}
+	if err == nil {
+		s.propagateAOF(c, name, args)
+	}
+	return err
+}
+
+// writeCommands lists the commands that mutate the keyspace and replay
+// deterministically as sent, so they are appended to the AOF verbatim.
+// Absent by design: SCACHE.SET (would re-call the embeddings endpoint on
+// replay; its handler propagates the resulting VSET instead) and SAVE/BGSAVE
+// (no keyspace effect).
+var writeCommands = map[string]bool{
+	"SET": true, "GETSET": true, "APPEND": true, "SETRANGE": true,
+	"INCR": true, "DECR": true, "INCRBY": true, "DECRBY": true, "MSET": true,
+	"DEL": true, "PERSIST": true, "FLUSHDB": true, "FLUSHALL": true,
+	"RENAME": true, "RENAMENX": true,
+	"EXPIRE": true, "PEXPIRE": true, "EXPIREAT": true, "PEXPIREAT": true,
+	"HSET": true, "HDEL": true,
+	"LPUSH": true, "RPUSH": true, "LPOP": true, "RPOP": true,
+	"SADD": true, "SREM": true,
+	"ZADD": true, "ZREM": true,
+	"VSET": true, "VDEL": true,
+	"REMEMBER": true,
+}
+
+// propagateAOF appends the just-executed command to the AOF. A handler can
+// override what gets logged by setting c.aofCmds (an empty slice suppresses
+// logging entirely); otherwise write commands are logged as received, with
+// relative-TTL commands translated to absolute PEXPIREAT so replay does not
+// depend on the wall clock.
+func (s *Server) propagateAOF(c *conn, name string, args []string) {
+	a := s.cfg.AOF
+	if a == nil || !a.Active() {
+		return
+	}
+	cmds := c.aofCmds
+	if cmds == nil {
+		if !writeCommands[name] {
+			return
+		}
+		switch name {
+		case "EXPIRE", "PEXPIRE":
+			if len(args) != 3 {
+				return
+			}
+			n, err := strconv.ParseInt(args[2], 10, 64)
+			if err != nil {
+				return // the handler already rejected it
+			}
+			unit := time.Second
+			if name == "PEXPIRE" {
+				unit = time.Millisecond
+			}
+			at := time.Now().Add(time.Duration(n) * unit).UnixMilli()
+			cmds = [][]string{{"PEXPIREAT", args[1], strconv.FormatInt(at, 10)}}
+		default:
+			cmds = [][]string{args}
+		}
+	}
+	for _, cmd := range cmds {
+		if err := a.Append(cmd); err != nil {
+			fmt.Fprintf(os.Stderr, "cache-pot: aof append failed: %v\n", err)
+			return
+		}
+	}
+}
+
+// LoadAOF replays the append-only file through the normal dispatch table and
+// then activates logging. If the store was pre-loaded from a snapshot and the
+// AOF is empty, the file is seeded from the current keyspace instead. A
+// corrupt tail (crash mid-write) is repaired by compacting the file after
+// replaying the intact prefix. It returns the number of commands replayed.
+func (s *Server) LoadAOF() (int, error) {
+	a := s.cfg.AOF
+	if a == nil {
+		return 0, nil
+	}
+	c := &conn{
+		s:       s,
+		w:       resp.NewWriter(io.Discard),
+		subs:    make(map[string]*pubsub.Subscription),
+		psubs:   make(map[string]*pubsub.Subscription),
+		authed:  true,
+		kind:    "aof-replay",
+		created: time.Now(),
+	}
+	n, corrupt, err := a.Replay(func(args []string) {
+		if h, ok := s.dispatch[strings.ToUpper(args[0])]; ok {
+			h(c, args)
+			c.flush()
+		}
+	})
+	if err != nil {
+		return n, err
+	}
+	if corrupt {
+		fmt.Fprintln(os.Stderr, "cache-pot: aof has a truncated tail (crash mid-write?); compacting")
+		if err := a.Rewrite(s.store.Export()); err != nil {
+			return n, fmt.Errorf("compact aof: %w", err)
+		}
+	}
+	if n == 0 && s.store.DBSize() > 0 {
+		// First run with AOF on top of an existing snapshot: seed the log.
+		if err := a.Rewrite(s.store.Export()); err != nil {
+			return n, fmt.Errorf("seed aof: %w", err)
+		}
+	}
+	a.SetActive(true)
+	return n, nil
 }

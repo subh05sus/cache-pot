@@ -54,21 +54,23 @@ func New() *Store {
 	return s
 }
 
-func (s *Store) shardFor(key string) *shard {
+func shardIndexFor(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
-	return s.shards[h.Sum32()%shardCount]
+	return int(h.Sum32() % shardCount)
 }
 
-// getLive returns the live entry for key, deleting it first if it has expired
-// (lazy expiry). The caller must hold the shard write lock when del==true.
+func (s *Store) shardFor(key string) *shard {
+	return s.shards[shardIndexFor(key)]
+}
+
+// getLive returns the live entry for key. Expired entries are treated as
+// absent but left in place — several read paths (TTL, LLen, ZScore, ...) call
+// this holding only the shard read lock, so deleting here would be a map
+// write under RLock. The background sweeper (or an overwrite) reclaims them.
 func (sh *shard) getLive(key string, now time.Time) (*entry, bool) {
 	e, ok := sh.m[key]
-	if !ok {
-		return nil, false
-	}
-	if e.expired(now) {
-		delete(sh.m, key)
+	if !ok || e.expired(now) {
 		return nil, false
 	}
 	return e, true
@@ -109,13 +111,18 @@ func (s *Store) Del(keys ...string) int {
 // "zset", "vector") or "none" if it does not exist.
 func (s *Store) Type(key string) string {
 	sh := s.shardFor(key)
-	sh.mu.Lock()
-	defer sh.mu.Unlock()
+	sh.mu.RLock()
+	defer sh.mu.RUnlock()
 	e, ok := sh.getLive(key, s.now())
 	if !ok {
 		return "none"
 	}
-	switch e.val.(type) {
+	return typeName(e.val)
+}
+
+// typeName maps a stored value to its Redis type name.
+func typeName(v value) string {
+	switch v.(type) {
 	case string:
 		return "string"
 	case map[string]string:
@@ -144,6 +151,21 @@ func (s *Store) Expire(key string, ttl time.Duration) bool {
 		return false
 	}
 	e.expireAt = s.now().Add(ttl)
+	return true
+}
+
+// ExpireAt sets an absolute expiry time on an existing key. It reports
+// whether the key existed. A time in the past makes the key expire on its
+// next access or sweep.
+func (s *Store) ExpireAt(key string, at time.Time) bool {
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	e, ok := sh.getLive(key, s.now())
+	if !ok {
+		return false
+	}
+	e.expireAt = at
 	return true
 }
 

@@ -55,6 +55,16 @@ func (c *conn) cmdSCacheSet(args []string) error {
 	if err := c.s.store.VSet(scacheCollection, prompt, vec, string(meta)); err != nil {
 		return c.storeErr(err)
 	}
+	// Propagate to the AOF as the resulting VSET, not as SCACHE.SET, so a
+	// replay stores the already-computed vector instead of re-calling the
+	// embeddings endpoint.
+	cmd := make([]string, 0, len(vec)+5)
+	cmd = append(cmd, "VSET", scacheCollection, prompt)
+	for _, f := range vec {
+		cmd = append(cmd, strconv.FormatFloat(float64(f), 'g', -1, 32))
+	}
+	cmd = append(cmd, "META", string(meta))
+	c.aofCmds = [][]string{cmd}
 	return c.writeSimple("OK")
 }
 

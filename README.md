@@ -45,7 +45,6 @@ Where Cache-Pot is different:
 What Cache-Pot does NOT do yet (so you know what you are getting):
 
 - No clustering, no replication, no failover.
-- No append-only-file durability (it saves snapshots to disk instead).
 - Not tuned to beat Redis or Valkey on raw speed.
 
 So: great as a Redis-style cache and an AI data layer for one machine. Not yet a replacement for a big production Redis cluster.
@@ -176,9 +175,20 @@ Start Cache-Pot, then add this to your Claude config and Claude can use Cache-Po
 
 Step by step guide: [docs/mcp.md](docs/mcp.md).
 
-### The dashboard
+### The console (dashboard)
 
-Open http://localhost:8080 in your browser while Cache-Pot is running. You will see your keys, memory use, and the cache hit rate, updating live. Turn it off with `--dashboard-addr ""`.
+Open http://localhost:8080 while Cache-Pot is running for a full management console — no build step, no external assets, all embedded in the binary:
+
+- **Overview** — live stat tiles and five-minute charts (commands/sec, memory, keys, clients).
+- **Browser** — search and page through keys (flat or namespace tree), inspect and edit every type, set TTLs, rename, delete, create.
+- **Workbench** — a CLI in the browser with history and inline command help.
+- **Profiler** — a live MONITOR-style stream of every command the server runs.
+- **SlowLog** — commands slower than a configurable threshold.
+- **Pub/Sub** — subscribe to channels or patterns and publish, live.
+- **Analysis** — memory by type and namespace, TTL distribution, largest keys.
+- **Clients** — every connection, with a kill switch.
+
+Binary-unsafe keys and values are shown as hex rather than mangled. Turn the console off with `--dashboard-addr ""`.
 
 ## Cache-Pot vs Redis vs Valkey
 
@@ -204,6 +214,8 @@ Every flag also has a `CACHEPOT_*` environment variable.
 | `--auth` | `CACHEPOT_AUTH` | empty | Require a password (empty means no password) |
 | `--snapshot-path` | `CACHEPOT_SNAPSHOT_PATH` | `cache-pot.snapshot` | Where to save data (empty turns saving off) |
 | `--snapshot-interval` | `CACHEPOT_SNAPSHOT_INTERVAL` | `60s` | How often to save to disk |
+| `--aof-path` | `CACHEPOT_AOF_PATH` | empty | Append-only file: log every write and replay on restart (empty turns it off) |
+| `--aof-fsync` | `CACHEPOT_AOF_FSYNC` | `everysec` | How often to fsync the AOF: `always`, `everysec` or `no` |
 | `--dashboard-addr` | `CACHEPOT_DASHBOARD_ADDR` | `:8080` | Dashboard port (empty turns it off) |
 | `CACHEPOT_EMBED_URL` | `CACHEPOT_EMBED_URL` | empty | Embeddings endpoint for the semantic cache |
 | `CACHEPOT_EMBED_MODEL` | `CACHEPOT_EMBED_MODEL` | `text-embedding-3-small` | Which embedding model to use |
@@ -231,7 +243,8 @@ cache-pot
 
 - Done: core Redis commands, strings, hashes, lists, sets, sorted sets, expiry, pub/sub, snapshot saving.
 - Done: vector store, semantic cache, agent memory, MCP server, dashboard.
-- Next: replication, stronger durability, clustering, faster vector index (HNSW).
+- Done: append-only-file durability (`--aof-path`, crash-safe writes with `BGREWRITEAOF` compaction).
+- Next: replication, clustering, faster vector index (HNSW).
 
 ## Support the project
 

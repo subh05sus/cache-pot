@@ -48,6 +48,8 @@ func runServer(argv []string) error {
 	password := fs.String("auth", env("CACHEPOT_AUTH", ""), "require this AUTH password ('' disables auth)")
 	snapPath := fs.String("snapshot-path", env("CACHEPOT_SNAPSHOT_PATH", "cache-pot.snapshot"), "snapshot file path ('' disables persistence)")
 	snapInterval := fs.Duration("snapshot-interval", envDuration("CACHEPOT_SNAPSHOT_INTERVAL", 60*time.Second), "how often to snapshot to disk")
+	aofPath := fs.String("aof-path", env("CACHEPOT_AOF_PATH", ""), "append-only file path ('' disables AOF)")
+	aofFsync := fs.String("aof-fsync", env("CACHEPOT_AOF_FSYNC", "everysec"), "AOF fsync policy: always, everysec or no")
 	sweepInterval := fs.Duration("sweep-interval", envDuration("CACHEPOT_SWEEP_INTERVAL", 10*time.Second), "how often the expiry sweeper runs")
 	dashAddr := fs.String("dashboard-addr", env("CACHEPOT_DASHBOARD_ADDR", ":8080"), "web dashboard address ('' disables it)")
 	showVersion := fs.Bool("version", false, "print version and exit")
@@ -60,11 +62,26 @@ func runServer(argv []string) error {
 
 	st := store.New()
 
+	// Append-only file (optional). Opened before the snapshot loads because a
+	// non-empty AOF is the authoritative dataset and skips the snapshot.
+	var aof *persist.AOF
+	if *aofPath != "" {
+		policy, err := persist.ParseSyncPolicy(*aofFsync)
+		if err != nil {
+			return err
+		}
+		if aof, err = persist.OpenAOF(*aofPath, policy); err != nil {
+			return fmt.Errorf("open aof: %w", err)
+		}
+	}
+
 	// Snapshot persistence (optional).
 	var snap *persist.Snapshotter
 	if *snapPath != "" {
 		snap = persist.New(st, *snapPath)
-		if loaded, err := snap.Load(); err != nil {
+		if aof != nil && aof.HasData() {
+			fmt.Printf("cache-pot: aof %s present, skipping snapshot load\n", *aofPath)
+		} else if loaded, err := snap.Load(); err != nil {
 			return fmt.Errorf("load snapshot: %w", err)
 		} else if loaded {
 			fmt.Printf("cache-pot: loaded snapshot from %s (%d keys)\n", *snapPath, st.DBSize())
@@ -90,8 +107,29 @@ func runServer(argv []string) error {
 		Addr:        *addr,
 		Password:    *password,
 		Snapshotter: snap,
+		AOF:         aof,
 		Embed:       emb,
 	})
+
+	// Replay the AOF (or seed it from the snapshot), then start background
+	// fsync for the everysec policy.
+	aofStop := make(chan struct{})
+	aofDone := make(chan struct{})
+	if aof != nil {
+		n, err := srv.LoadAOF()
+		if err != nil {
+			return fmt.Errorf("load aof: %w", err)
+		}
+		if n > 0 {
+			fmt.Printf("cache-pot: replayed %d commands from %s (%d keys)\n", n, *aofPath, st.DBSize())
+		}
+		go func() {
+			aof.StartSync(aofStop)
+			close(aofDone)
+		}()
+	} else {
+		close(aofDone)
+	}
 
 	// Background snapshotting until shutdown, then a final save.
 	snapStop := make(chan struct{})
@@ -126,6 +164,20 @@ func runServer(argv []string) error {
 			fmt.Fprintf(os.Stderr, "cache-pot: final snapshot failed: %v\n", serr)
 		} else {
 			fmt.Println("cache-pot: final snapshot written")
+		}
+	}
+
+	// Compact the AOF on graceful shutdown so restarts replay the minimal log.
+	close(aofStop)
+	<-aofDone
+	if aof != nil {
+		if rerr := aof.Rewrite(st.Export()); rerr != nil {
+			fmt.Fprintf(os.Stderr, "cache-pot: final aof compaction failed: %v\n", rerr)
+		}
+		if cerr := aof.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "cache-pot: aof close failed: %v\n", cerr)
+		} else {
+			fmt.Println("cache-pot: aof compacted and closed")
 		}
 	}
 	return err

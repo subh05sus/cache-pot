@@ -18,6 +18,7 @@ conventions; arguments in `<>` are required, `[]` optional. Cache-Pot is single
 | `DBSIZE` | Number of live keys. |
 | `FLUSHDB` / `FLUSHALL` | Remove all keys. |
 | `SAVE` / `BGSAVE` | Write a snapshot to disk now. |
+| `BGREWRITEAOF` | Compact the append-only file (requires `--aof-path`). |
 
 ## Keys
 
@@ -27,11 +28,33 @@ conventions; arguments in `<>` are required, `[]` optional. Cache-Pot is single
 | `EXISTS <key> [key ...]` | Count of keys that exist. |
 | `EXPIRE <key> <seconds>` | Set a TTL in seconds. |
 | `PEXPIRE <key> <ms>` | Set a TTL in milliseconds. |
+| `EXPIREAT <key> <unix-seconds>` | Expire at an absolute Unix time. |
+| `PEXPIREAT <key> <unix-ms>` | Expire at an absolute Unix time in ms. |
 | `TTL <key>` | Seconds left (`-1` no TTL, `-2` missing). |
 | `PTTL <key>` | Milliseconds left. |
 | `PERSIST <key>` | Remove the TTL. |
-| `KEYS <pattern>` | Glob-match keys (`*`, `?`, `[...]`). |
+| `KEYS <pattern>` | Glob-match keys (`*`, `?`, `[...]`). Prefer `SCAN` on big keyspaces. |
 | `TYPE <key>` | `string`/`hash`/`list`/`set`/`zset`/`vector`/`none`. |
+| `RENAME <key> <newkey>` | Rename a key (TTL survives); error if `key` is missing. |
+| `RENAMENX <key> <newkey>` | Rename only if `newkey` does not exist; returns `0`/`1`. |
+| `SCAN <cursor> [MATCH pat] [COUNT n] [TYPE t]` | Incremental keyspace iteration; cursor `0` starts and ends a scan. |
+| `HSCAN <key> <cursor> [MATCH pat] [COUNT n]` | Iterate a hash's fields and values. |
+| `SSCAN <key> <cursor> [MATCH pat] [COUNT n]` | Iterate a set's members. |
+| `ZSCAN <key> <cursor> [MATCH pat] [COUNT n]` | Iterate a sorted set's members and scores. |
+| `MEMORY USAGE <key> [SAMPLES n]` | Approximate bytes held by the key (heuristic; `SAMPLES` accepted and ignored). |
+
+## Observability
+
+| Command | Description |
+|---|---|
+| `MONITOR` | Stream every dispatched command to this connection (`QUIT`/`RESET` to exit). AUTH arguments are redacted. |
+| `SLOWLOG GET [n]` / `SLOWLOG RESET` / `SLOWLOG LEN` | Log of commands slower than the threshold. |
+| `CONFIG GET/SET slowlog-log-slower-than` | Threshold in microseconds; `0` logs everything, `-1` disables timing. |
+| `CONFIG GET/SET slowlog-max-len` | How many slow entries to retain (default 128). |
+| `CLIENT LIST` | One line per connection: id, addr, name, age, idle, last command. |
+| `CLIENT ID` / `CLIENT SETNAME` / `CLIENT GETNAME` | Connection identity. |
+| `CLIENT KILL ID <id>` | Close a connection by id; returns the number killed. |
+| `RESET` | Leave MONITOR mode and drop this connection's subscriptions. |
 
 ## Strings
 
@@ -85,10 +108,12 @@ ZRANGEBYSCORE board 150 +inf        # bob
 
 ## Pub/Sub
 
-`SUBSCRIBE <channel ...>`, `UNSUBSCRIBE [channel ...]`, `PUBLISH <channel> <message>`.
+`SUBSCRIBE <channel ...>`, `UNSUBSCRIBE [channel ...]`, `PSUBSCRIBE <pattern ...>`,
+`PUNSUBSCRIBE [pattern ...]`, `PUBLISH <channel> <message>`.
 
-A slow subscriber that fills its buffer drops messages rather than blocking
-publishers.
+Patterns use the same glob syntax as `KEYS` (`news:*`). Pattern deliveries
+arrive as 4-element `pmessage` replies. A slow subscriber that fills its
+buffer drops messages rather than blocking publishers.
 
 ## Vector store
 

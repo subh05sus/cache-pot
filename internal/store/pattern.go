@@ -1,9 +1,14 @@
 package store
 
-// matchPattern implements Redis' glob-style key matching: '*' matches any run
+// MatchPattern implements Redis' glob-style key matching: '*' matches any run
 // of characters, '?' matches a single character, '[...]' matches a character
 // class, and '\\' escapes the next character. It operates on bytes, which is
 // sufficient for key matching.
+func MatchPattern(pattern, s string) bool {
+	return globMatch(pattern, s)
+}
+
+// matchPattern is the internal alias used by pre-existing callers.
 func matchPattern(pattern, s string) bool {
 	return globMatch(pattern, s)
 }

@@ -86,13 +86,27 @@ collection, it is snapshotted and visible like any other key.
 
 ## Persistence (`internal/persist`)
 
-The whole keyspace is exported to a serialisable `[]store.Record`, gob-encoded,
-and written atomically (temp file + rename). It runs on an interval and once
-more on graceful shutdown (SIGINT/SIGTERM), and is loaded on startup. This is
-the V1 durability model; append-only-file durability is a V3 item.
+Two mechanisms, both optional and independently configurable:
+
+**Snapshots** — the whole keyspace is exported to a serialisable
+`[]store.Record`, gob-encoded, and written atomically (temp file + rename). It
+runs on an interval and once more on graceful shutdown (SIGINT/SIGTERM), and
+is loaded on startup.
+
+**Append-only file** (`--aof-path`) — every write command is appended to a log
+as a RESP array and replayed through the normal dispatch table on startup, so
+a crash loses at most one fsync interval (`--aof-fsync always|everysec|no`).
+Relative TTLs (`EXPIRE`, `SET ... EX`) are logged as absolute `PEXPIREAT`
+deadlines so replay does not depend on the wall clock, and `SCACHE.SET` is
+logged as its resulting `VSET` so replay never re-calls the embeddings
+endpoint. A truncated tail from a mid-write crash is detected and compacted
+away. When both mechanisms are on and the AOF is non-empty, the AOF is the
+authoritative dataset at startup. `BGREWRITEAOF` compacts the log to the
+minimal command set for the live keyspace; a compaction also runs on graceful
+shutdown.
 
 ## What's intentionally absent
 
-Clustering, replication, AOF, Lua scripting, multi-database, and RESP3 — all
+Clustering, replication, Lua scripting, multi-database, and RESP3 — all
 deferred per the PRD's V1 non-goals. Keeping the surface small is what makes the
 agent-native layer (vectors, semantic cache, MCP) shippable solo.
