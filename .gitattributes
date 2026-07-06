@@ -1,0 +1,8 @@
+# Normalise line endings to LF in the repo for cross-platform consistency.
+* text=auto eol=lf
+*.go text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.html text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf

@@ -1,0 +1,9 @@
+.git
+.github
+dist/
+*.snapshot
+*.exe
+cache-pot
+prd.md
+docs/
+README.md
