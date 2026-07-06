@@ -176,5 +176,6 @@ func (c *conn) cmdReset(args []string) error {
 		c.monSub = nil
 	}
 	c.unsubscribeAll()
+	c.clearMulti()
 	return c.writeSimple("RESET")
 }

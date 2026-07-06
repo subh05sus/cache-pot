@@ -189,6 +189,26 @@ func TestAOFCorruptTailRecovered(t *testing.T) {
 	}
 }
 
+func TestAOFLogsTransaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.aof")
+	cli, cleanup := startAOFServer(t, store.New(), path)
+
+	mustDo(t, cli, "MULTI")
+	mustDo(t, cli, "SET", "a", "1")
+	mustDo(t, cli, "INCR", "a")
+	mustDo(t, cli, "SET", "b", "2")
+	mustDo(t, cli, "EXEC")
+	cleanup()
+
+	st := replayInto(t, path)
+	if v, ok, _ := st.Get("a"); !ok || v != "2" {
+		t.Fatalf("a = %q, %v (EXEC writes not logged?)", v, ok)
+	}
+	if v, ok, _ := st.Get("b"); !ok || v != "2" {
+		t.Fatalf("b = %q, %v", v, ok)
+	}
+}
+
 func TestAOFRewriteCompacts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.aof")
 	st := store.New()

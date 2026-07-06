@@ -4,7 +4,7 @@
 
 <h1 align="center">Cache-Pot</h1>
 
-<p align="center"><b>RAM + cache-pot. In memory, and fast to spin up.</b></p>
+<p align="center"><b>In-memory, Redis-compatible, and built for AI. Runs from a single binary.</b></p>
 
 <p align="center">
   <a href="https://github.com/subh05sus/cache-pot/actions/workflows/ci.yml"><img src="https://github.com/subh05sus/cache-pot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -22,36 +22,36 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs welcome"></a>
 </p>
 
-Cache-Pot is a fast in-memory data store, like Redis, but built for AI apps and AI agents.
+Cache-Pot is an in-memory data store in the Redis mould, reworked around the way AI apps and agents actually use a cache.
 
-It does three things:
+Under the hood it wears three hats:
 
-1. It works as a drop-in cache. It speaks the same protocol as Redis, so your existing Redis client and code keep working with no changes.
-2. It can store and search vectors, and it can cache AI answers by meaning. So if two prompts mean the same thing, Cache-Pot can return the saved answer instead of calling the model again. That saves you money.
-3. It has a built-in MCP server. That means AI agents (like Claude) can read, write, search, and remember data in Cache-Pot directly as a tool. No extra glue code needed.
+- **A Redis-compatible cache.** It talks RESP2 on the wire, so the Redis client you already have — and the code around it — keeps working untouched.
+- **A vector and semantic layer.** Store vectors and search them by nearest neighbour, or cache model answers by meaning: ask something close to a question you asked before and Cache-Pot hands back the earlier answer instead of paying for another model call.
+- **A native MCP endpoint.** Agents such as Claude can read, write, search, and remember through Cache-Pot as a first-class tool — no adapter layer in between.
 
-> Redis was built for app servers. Cache-Pot is built for AI agents.
+> Redis grew up serving app servers. Cache-Pot is aimed squarely at AI agents.
 
-## Is this a Redis alternative?
+## Should you reach for this instead of Redis?
 
-Yes, for a lot of common use cases. If you use Redis (or Valkey) as a cache or a simple key value store, you can point your app at Cache-Pot instead and it will just work, because Cache-Pot speaks the Redis protocol (RESP2).
+For a wide slice of everyday work, yes. Anywhere you lean on Redis (or Valkey) as a cache or a plain key/value store, you can repoint the app at Cache-Pot and carry on — the RESP2 protocol is the same one your client already speaks.
 
-Where Cache-Pot is different:
+What sets it apart:
 
-- It has vector search and a semantic cache built in. With Redis you would need an extra module or extra code for that.
-- It has an MCP server built in, so AI agents can use it as a tool out of the box.
-- It is one small single file (a single binary) with no extra dependencies. Easy to download and run.
+- Vector search and a semantic cache ship in the box; on Redis those mean bolting on a module or writing extra glue.
+- An MCP server is built in, so agents pick it up as a tool with zero setup.
+- The whole thing is one self-contained binary — nothing else to install, quick to grab and run.
 
-What Cache-Pot does NOT do yet (so you know what you are getting):
+And the honest limits, so there are no surprises:
 
-- No clustering, no replication, no failover.
-- Not tuned to beat Redis or Valkey on raw speed.
+- No clustering, replication, or failover.
+- Not hand-tuned to win a raw-throughput race against Redis or Valkey.
 
-So: great as a Redis-style cache and an AI data layer for one machine. Not yet a replacement for a big production Redis cluster.
+Read that as: a strong Redis-style cache and AI data layer for a single machine — not a stand-in for a large production Redis cluster.
 
-## Quick start (the simple version)
+## Getting started
 
-You need [Go](https://go.dev/dl/) installed (version 1.25 or newer). Then run one of these.
+Grab [Go](https://go.dev/dl/) 1.25 or newer, then pick whichever of the three below suits you.
 
 ### Option 1: install with Go
 
@@ -74,20 +74,20 @@ cd Cache-Pot
 go run ./cmd/cache-pot
 ```
 
-When it starts you will see:
+On startup the log prints:
 
 ```
 cache-pot: listening on [::]:6379
 cache-pot: dashboard on http://localhost:8080
 ```
 
-That is it. Cache-Pot is now running on port 6379, and a live dashboard is at http://localhost:8080.
+Done — the store answers on port 6379 and a live dashboard sits at http://localhost:8080.
 
-## How to use it
+## Working with it
 
-### Talk to it like Redis
+### Speak Redis to it
 
-If you have `redis-cli` installed, just connect to port 6379:
+Have `redis-cli` around? Point it at port 6379 and go:
 
 ```bash
 redis-cli -p 6379
@@ -102,15 +102,15 @@ OK
 (integer) 1
 ```
 
-If you have an app that already uses Redis, point it at Cache-Pot. Usually you only change one setting:
+Already running an app on Redis? Aim it here — typically a single line changes:
 
 ```bash
 export REDIS_URL=redis://localhost:6379
 ```
 
-### Basic commands
+### Everyday commands
 
-These work just like Redis:
+Same shapes you know from Redis:
 
 ```
 SET user:1 "Subh"          store a value
@@ -124,11 +124,11 @@ SUBSCRIBE news              listen for messages
 PUBLISH news "hello"        send a message
 ```
 
-Full list with examples: [docs/commands.md](docs/commands.md).
+Complete reference with examples: [docs/commands.md](docs/commands.md).
 
 ### Vector search
 
-Store vectors and find the closest ones. Your app gives Cache-Pot the numbers, no API key needed.
+Save vectors, then pull back the nearest matches. Your app supplies the numbers directly — no API key in the loop.
 
 ```
 VSET docs d1 0.1 0.2 0.9 META "intro page"
@@ -136,9 +136,9 @@ VSET docs d2 0.9 0.1 0.0 META "pricing page"
 VSEARCH docs 0.1 0.2 0.85 TOPK 1 WITHSCORES
 ```
 
-### Semantic cache (save money on AI calls)
+### Semantic cache (trim your model bill)
 
-Cache an AI answer once. Next time a similar question comes in, get the saved answer back instead of paying for another model call.
+Store a model's answer once. When a close-enough question shows up later, Cache-Pot returns the stored answer rather than billing you for a fresh call.
 
 ```
 SCACHE.SET "What is the capital of France?" "Paris"
@@ -146,11 +146,11 @@ SCACHE.GET "whats the capital of france" THRESHOLD 0.9
 > "Paris"
 ```
 
-This needs an embeddings provider. It works with a free local [Ollama](https://ollama.com) or with OpenAI. See [Configuration](#configuration).
+You'll need an embeddings provider for this — a free local [Ollama](https://ollama.com) works, and so does OpenAI. See [Configuration](#configuration).
 
 ### Agent memory
 
-Let an AI agent remember things across turns:
+Give an agent a place to keep things between turns:
 
 ```
 REMEMBER session7 user_name Subh
@@ -158,9 +158,9 @@ RECALL session7 user_name
 > "Subh"
 ```
 
-### Use it from Claude (MCP)
+### Wire it into Claude (MCP)
 
-Start Cache-Pot, then add this to your Claude config and Claude can use Cache-Pot as a tool:
+Launch Cache-Pot, drop this into your Claude config, and Claude gains it as a tool:
 
 ```json
 {
@@ -173,11 +173,11 @@ Start Cache-Pot, then add this to your Claude config and Claude can use Cache-Po
 }
 ```
 
-Step by step guide: [docs/mcp.md](docs/mcp.md).
+Full walkthrough: [docs/mcp.md](docs/mcp.md).
 
 ### The console (dashboard)
 
-Open http://localhost:8080 while Cache-Pot is running for a full management console — no build step, no external assets, all embedded in the binary:
+With Cache-Pot running, browse to http://localhost:8080 for a complete management console — no build step, no external assets, the whole thing baked into the binary:
 
 - **Overview** — live stat tiles and five-minute charts (commands/sec, memory, keys, clients).
 - **Browser** — search and page through keys (flat or namespace tree), inspect and edit every type, set TTLs, rename, delete, create.
@@ -188,7 +188,7 @@ Open http://localhost:8080 while Cache-Pot is running for a full management cons
 - **Analysis** — memory by type and namespace, TTL distribution, largest keys.
 - **Clients** — every connection, with a kill switch.
 
-Binary-unsafe keys and values are shown as hex rather than mangled. Turn the console off with `--dashboard-addr ""`.
+Keys and values that aren't safe to print land as hex instead of getting mangled. Shut the console off with `--dashboard-addr ""`.
 
 ## Cache-Pot vs Redis vs Valkey
 
@@ -206,7 +206,7 @@ Binary-unsafe keys and values are shown as hex rather than mangled. Turn the con
 
 ## Configuration
 
-Every flag also has a `CACHEPOT_*` environment variable.
+Each flag mirrors a `CACHEPOT_*` environment variable.
 
 | Flag | Env var | Default | What it does |
 |---|---|---|---|
@@ -221,7 +221,7 @@ Every flag also has a `CACHEPOT_*` environment variable.
 | `CACHEPOT_EMBED_MODEL` | `CACHEPOT_EMBED_MODEL` | `text-embedding-3-small` | Which embedding model to use |
 | `CACHEPOT_EMBED_KEY` | `CACHEPOT_EMBED_KEY` | empty | API key for the embeddings endpoint |
 
-Turn on the semantic cache for free with a local Ollama:
+Spin up the semantic cache for free against a local Ollama:
 
 ```bash
 ollama pull nomic-embed-text
@@ -230,7 +230,7 @@ export CACHEPOT_EMBED_MODEL=nomic-embed-text
 cache-pot
 ```
 
-Or use OpenAI:
+Or point it at OpenAI:
 
 ```bash
 export CACHEPOT_EMBED_URL=https://api.openai.com/v1/embeddings
@@ -241,14 +241,15 @@ cache-pot
 
 ## Roadmap
 
-- Done: core Redis commands, strings, hashes, lists, sets, sorted sets, expiry, pub/sub, snapshot saving.
-- Done: vector store, semantic cache, agent memory, MCP server, dashboard.
-- Done: append-only-file durability (`--aof-path`, crash-safe writes with `BGREWRITEAOF` compaction).
-- Next: replication, clustering, faster vector index (HNSW).
+- Shipped — core Redis commands: strings, hashes, lists, sets, sorted sets, expiry, pub/sub, snapshot saving.
+- Shipped — vector store, semantic cache, agent memory, MCP server, dashboard.
+- Shipped — append-only-file durability (`--aof-path`, crash-safe writes with `BGREWRITEAOF` compaction).
+- Shipped — transactions (`MULTI`/`EXEC`/`DISCARD`/`WATCH`) and incremental iteration (`SCAN`/`HSCAN`/`SSCAN`/`ZSCAN`).
+- On deck — replication, clustering, a faster vector index (HNSW).
 
 ## Support the project
 
-Cache-Pot is free and open source, and it always will be. If it saves you time or you would like to help fund its development, you can support the work directly. It genuinely helps keep the project moving.
+Cache-Pot is free and open source, and that isn't going to change. If it's saved you time, or you'd like to help fund the work, you can back it directly — it makes a real difference to how fast the project moves.
 
 <p align="center">
   <a href="https://wise.com/pay/me/subhadips25">
@@ -256,30 +257,30 @@ Cache-Pot is free and open source, and it always will be. If it saves you time o
   </a>
 </p>
 
-Not in a position to chip in? A star, a share, or a bug report helps just as much. Thank you.
+Can't chip in right now? A star, a share, or a solid bug report counts for just as much. Thank you.
 
 ## Contributing
 
-Cache-Pot is open source and very new, which means this is a great time to get involved and make a real difference. Beginners are welcome. You do not need to be a Go expert.
+The project is open source and still young, so this is a rare moment where a single contribution really moves the needle. Newcomers are welcome — no Go wizardry required.
 
-Good first things to help with:
+Easy ways to pitch in:
 
-- Try it out and report bugs or confusing parts.
-- Improve the docs or add examples.
-- Add a missing Redis command.
-- Test Cache-Pot with your favourite Redis client and tell us what worked.
+- Run it, then report bugs or anything that felt confusing.
+- Sharpen the docs or add examples.
+- Fill in a missing Redis command.
+- Try Cache-Pot with your Redis client of choice and let us know how it went.
 
 ### Good first issues
 
-New here? These are small, self-contained, and well described. Pick one, comment to claim it, and you are off.
+Just arrived? These are small, self-contained, and spelled out. Grab one, comment to claim it, and you're rolling.
 
 - [**Good first issues**](https://github.com/subh05sus/cache-pot/labels/good%20first%20issue) beginner-friendly, clearly scoped tasks.
 - [**Help wanted**](https://github.com/subh05sus/cache-pot/labels/help%20wanted) things we would love a hand with.
 - [**All open issues**](https://github.com/subh05sus/cache-pot/issues) the full list.
 
-Most open issues are missing Redis commands with the exact files and acceptance criteria already written down, so you can follow an existing handler as a template and open a PR the same day.
+Most open issues are missing Redis commands, each with the exact files and acceptance criteria already laid out — copy an existing handler as your template and you can open a PR the same day.
 
-Then read the [Contributing Guide](CONTRIBUTING.md) to get started. If you are not sure where to begin, open an issue and say hi. Stars and shares also help a lot.
+From there, the [Contributing Guide](CONTRIBUTING.md) walks you through the rest. Unsure where to start? Open an issue and say hi. Stars and shares go a long way too.
 
 ## Star History
 
@@ -291,4 +292,4 @@ Then read the [Contributing Guide](CONTRIBUTING.md) to get started. If you are n
 
 ## License
 
-[BSD-3-Clause](LICENSE). This is the same license family Redis used before 2024, and the one Valkey uses. Simple and permissive, no surprises.
+[BSD-3-Clause](LICENSE) — the same permissive family Redis shipped under before 2024, and the license Valkey runs on today. Simple, permissive, no fine print.

@@ -115,6 +115,25 @@ Patterns use the same glob syntax as `KEYS` (`news:*`). Pattern deliveries
 arrive as 4-element `pmessage` replies. A slow subscriber that fills its
 buffer drops messages rather than blocking publishers.
 
+## Transactions
+
+| Command | Description |
+|---|---|
+| `MULTI` | Start a transaction; following commands reply `QUEUED`. |
+| `EXEC` | Run the queued commands, returning an array of their replies. |
+| `DISCARD` | Drop the queued commands and leave `MULTI`. |
+| `WATCH <key ...>` | Watch keys; `EXEC` aborts (returns nil) if any changed. |
+| `UNWATCH` | Forget all watched keys. |
+
+A command that can't be queued (unknown, or `SUBSCRIBE`/`MONITOR`) dirties the
+transaction, and the following `EXEC` fails with `EXECABORT` and runs nothing.
+
+Isolation is best-effort: each queued command is individually atomic and
+`WATCH` detects a concurrent change to a watched key, but `EXEC` does not hold
+a global lock, so commands from other connections can interleave between the
+queued commands. This matches Cache-Pot's existing multi-key semantics and is
+enough for the common watch-and-set (optimistic locking) pattern.
+
 ## Vector store
 
 | Command | Description |

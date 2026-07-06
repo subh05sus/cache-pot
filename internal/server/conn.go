@@ -50,6 +50,15 @@ type conn struct {
 	// Reset by dispatchCommand before every command.
 	aofCmds [][]string
 
+	// Transaction state (MULTI/EXEC/DISCARD/WATCH). queued accumulates commands
+	// between MULTI and EXEC; multiErr marks the transaction dirty after a
+	// command that could not be queued (unknown/forbidden), forcing EXECABORT;
+	// watched maps each WATCHed key to its store version at WATCH time.
+	inMulti  bool
+	multiErr bool
+	queued   []queuedCmd
+	watched  map[string]uint64
+
 	submu sync.Mutex
 	subs  map[string]*pubsub.Subscription
 	psubs map[string]*pubsub.Subscription
@@ -92,6 +101,7 @@ func (s *Server) serveConn(ctx context.Context, nc net.Conn) {
 	s.registerClient(c)
 	defer s.deregisterClient(c)
 	defer c.unsubscribeAll()
+	defer c.unwatchAll()
 
 	for {
 		select {
@@ -154,6 +164,12 @@ func (c *conn) writeNull() error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	return c.w.WriteNull()
+}
+
+func (c *conn) writeNullArray() error {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	return c.w.WriteNullArray()
 }
 
 func (c *conn) writeStringArray(items []string) error {

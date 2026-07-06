@@ -141,10 +141,41 @@ func (s *Server) dispatchCommand(c *conn, args []string) error {
 		s.publishMonitor(c, name, args)
 	}
 
+	// Transaction control commands are handled inline; they are never queued.
+	switch name {
+	case "MULTI":
+		return c.cmdMulti(args)
+	case "EXEC":
+		return c.cmdExec(args)
+	case "DISCARD":
+		return c.cmdDiscard(args)
+	case "WATCH":
+		return c.cmdWatch(args)
+	case "UNWATCH":
+		return c.cmdUnwatch(args)
+	}
+
 	h, ok := s.dispatch[name]
 	if !ok {
+		if c.inMulti {
+			c.multiErr = true // dirty the transaction so EXEC aborts
+		}
 		return c.writeError(fmt.Sprintf("ERR unknown command '%s'", args[0]))
 	}
+
+	// Inside MULTI, queue the command instead of running it. RESET and QUIT
+	// still take effect immediately, matching Redis.
+	if c.inMulti && name != "RESET" && name != "QUIT" {
+		return c.queueCommand(name, args)
+	}
+
+	return s.runHandler(c, name, args, h)
+}
+
+// runHandler executes one command handler with the slowlog timer, watch
+// notification, and AOF propagation. It is shared by normal dispatch and by
+// EXEC replaying queued commands.
+func (s *Server) runHandler(c *conn, name string, args []string, h handler) error {
 	c.aofCmds = nil
 
 	thresholdUs := s.slowlog.thresholdUs.Load()
@@ -162,9 +193,44 @@ func (s *Server) dispatchCommand(c *conn, args []string) error {
 		}
 	}
 	if err == nil {
+		s.notifyWatch(name, args)
 		s.propagateAOF(c, name, args)
 	}
 	return err
+}
+
+// notifyWatch bumps the modification version of every key a write command
+// touched, so any transaction watching one of them aborts at EXEC. It is a
+// single atomic load when no connection is watching anything.
+func (s *Server) notifyWatch(name string, args []string) {
+	if !writeCommands[name] {
+		return
+	}
+	switch name {
+	case "FLUSHDB", "FLUSHALL":
+		// store.Flush already bumps every watched key; nothing to do here.
+	case "MSET":
+		for i := 1; i+1 < len(args); i += 2 {
+			s.store.Modified(args[i])
+		}
+	case "DEL":
+		for _, k := range args[1:] {
+			s.store.Modified(k)
+		}
+	case "RENAME", "RENAMENX":
+		if len(args) == 3 {
+			s.store.Modified(args[1])
+			s.store.Modified(args[2])
+		}
+	case "REMEMBER":
+		if len(args) >= 2 {
+			s.store.Modified("mem:" + args[1])
+		}
+	default:
+		if len(args) >= 2 {
+			s.store.Modified(args[1])
+		}
+	}
 }
 
 // writeCommands lists the commands that mutate the keyspace and replay

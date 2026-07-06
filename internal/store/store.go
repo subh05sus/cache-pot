@@ -8,6 +8,7 @@ package store
 import (
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/subh05sus/cache-pot/internal/vector"
@@ -43,11 +44,19 @@ type shard struct {
 type Store struct {
 	shards [shardCount]*shard
 	now    func() time.Time // injectable clock for tests
+
+	// Watch tracking for optimistic transactions (WATCH/MULTI/EXEC). watches
+	// holds a modification version per currently-watched key; watchActive is a
+	// fast-path count so writes skip the mutex entirely when nobody is
+	// watching.
+	watchMu     sync.Mutex
+	watches     map[string]*watchEntry
+	watchActive atomic.Int64
 }
 
 // New returns an empty store.
 func New() *Store {
-	s := &Store{now: time.Now}
+	s := &Store{now: time.Now, watches: make(map[string]*watchEntry)}
 	for i := range s.shards {
 		s.shards[i] = &shard{m: make(map[string]*entry)}
 	}
@@ -233,11 +242,13 @@ func (s *Store) DBSize() int {
 	return n
 }
 
-// Flush removes every key.
+// Flush removes every key. Every watched key is treated as modified so any
+// in-flight transaction that watched a now-deleted key aborts.
 func (s *Store) Flush() {
 	for _, sh := range s.shards {
 		sh.mu.Lock()
 		sh.m = make(map[string]*entry)
 		sh.mu.Unlock()
 	}
+	s.ModifiedAll()
 }
