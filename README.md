@@ -7,11 +7,9 @@
 <p align="center"><b>In-memory, Redis-compatible, and built for AI. Runs from a single binary.</b></p>
 
 <p align="center">
-  <a href="https://github.com/subh05sus/cache-pot/actions/workflows/ci.yml"><img src="https://github.com/subh05sus/cache-pot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/status-V1%20%2B%20V2%20preview-orange" alt="status">
   <img src="https://img.shields.io/badge/go-1.25-00ADD8" alt="go">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue" alt="license">
-  <a href="https://wise.com/pay/me/subhadips25"><img src="https://img.shields.io/badge/support-Cache-Pot-9FE870?logo=wise&logoColor=163300&labelColor=163300" alt="Support Cache-Pot"></a>
 </p>
 
 <p align="center">
@@ -281,14 +279,6 @@ Just arrived? These are small, self-contained, and spelled out. Grab one, commen
 Most open issues are missing Redis commands, each with the exact files and acceptance criteria already laid out — copy an existing handler as your template and you can open a PR the same day.
 
 From there, the [Contributing Guide](CONTRIBUTING.md) walks you through the rest. Unsure where to start? Open an issue and say hi. Stars and shares go a long way too.
-
-## Star History
-
-<p align="center">
-  <a href="https://www.star-history.com/#subh05sus/cache-pot&Date">
-    <img src="assets/star-history.png" alt="Cache-Pot Star History Chart" width="80%">
-  </a>
-</p>
 
 ## License
 
