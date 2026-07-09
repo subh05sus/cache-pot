@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 	"github.com/subh05sus/cache-pot/internal/persist"
 	"github.com/subh05sus/cache-pot/internal/server"
 	"github.com/subh05sus/cache-pot/internal/store"
+	"github.com/subh05sus/cache-pot/internal/termutil"
+	"github.com/subh05sus/cache-pot/internal/tui"
 )
 
 func main() {
@@ -69,6 +72,7 @@ func runServer(argv []string) error {
 	aofFsync := fs.String("aof-fsync", env("CACHEPOT_AOF_FSYNC", "everysec"), "AOF fsync policy: always, everysec or no")
 	sweepInterval := fs.Duration("sweep-interval", envDuration("CACHEPOT_SWEEP_INTERVAL", 10*time.Second), "how often the expiry sweeper runs")
 	dashAddr := fs.String("dashboard-addr", env("CACHEPOT_DASHBOARD_ADDR", ":8080"), "web dashboard address ('' disables it)")
+	noTUI := fs.Bool("no-tui", envBool("CACHEPOT_NO_TUI", false), "disable the terminal UI even when running in a real terminal")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	fs.Parse(argv)
 
@@ -177,7 +181,38 @@ func runServer(argv []string) error {
 		}()
 	}
 
-	err := srv.ListenAndServe(ctx)
+	var err error
+	if !*noTUI && termutil.IsTerminal(os.Stdout) && termutil.IsTerminal(os.Stdin) {
+		// Real terminal on both ends: run the RESP server in the background
+		// and let the TUI own the terminal, exactly the way the dashboard
+		// already runs alongside it above. tui.Run returns either when the
+		// user backs out to plain logs (server keeps running) or when ctx
+		// is cancelled out from under it; either way we then just wait for
+		// the real shutdown signal before falling into the persistence
+		// teardown below, unchanged from the non-TUI path.
+		errCh := make(chan error, 1)
+		go func() { errCh <- srv.ListenAndServe(ctx) }()
+
+		if terr := tui.Run(ctx, stop, srv, tui.Info{
+			Version:       server.Version,
+			RespAddr:      *addr,
+			DashboardAddr: *dashAddr,
+			TLS:           *tlsCert != "",
+			Auth:          *password != "",
+			AOFPath:       *aofPath,
+			SnapshotPath:  *snapPath,
+		}); terr != nil {
+			// Raw mode couldn't be enabled (unsupported terminal, etc.) —
+			// fall back to plain logs for the rest of this run.
+			fmt.Fprintf(os.Stderr, "cache-pot: tui unavailable, continuing with plain logs: %v\n", terr)
+		} else {
+			fmt.Println("cache-pot: back to plain logs (Ctrl+C to shut down)")
+		}
+		<-ctx.Done()
+		err = <-errCh
+	} else {
+		err = srv.ListenAndServe(ctx)
+	}
 
 	// Shut down persistence and take a final snapshot.
 	close(snapStop)
@@ -219,6 +254,23 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envBool returns the boolean value of key ("1"/"true"/"yes", case-insensitive
+// count as true) or def if unset/unparseable.
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }
 
 func envDuration(key string, def time.Duration) time.Duration {

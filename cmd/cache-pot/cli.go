@@ -18,6 +18,7 @@ import (
 
 	"github.com/subh05sus/cache-pot/internal/client"
 	"github.com/subh05sus/cache-pot/internal/resp"
+	"github.com/subh05sus/cache-pot/internal/termutil"
 )
 
 func runCLI(argv []string) error {
@@ -45,7 +46,7 @@ func runCLI(argv []string) error {
 		}
 	}
 
-	color := !*noColor && isTerminal(os.Stdout)
+	color := !*noColor && termutil.IsTerminal(os.Stdout)
 	p := &printer{color: color, out: os.Stdout}
 
 	if len(oneShot) > 0 {
@@ -57,7 +58,7 @@ func runCLI(argv []string) error {
 		return nil
 	}
 
-	interactive := isTerminal(os.Stdin)
+	interactive := termutil.IsTerminal(os.Stdin)
 	return repl(c, p, *addr, interactive)
 }
 
@@ -321,14 +322,4 @@ func openHistory(interactive bool) *os.File {
 		return nil
 	}
 	return f
-}
-
-// isTerminal reports whether f is a character device (a TTY) rather than a pipe
-// or file, without pulling in a terminal dependency.
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
 }
