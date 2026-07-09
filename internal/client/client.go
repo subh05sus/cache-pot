@@ -5,6 +5,7 @@ package client
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strings"
@@ -29,6 +30,16 @@ func Dial(addr string) (*Client, error) {
 	return &Client{conn: conn, r: bufio.NewReader(conn)}, nil
 }
 
+// DialTLS connects to addr over TLS. A nil cfg uses the platform defaults.
+func DialTLS(addr string, cfg *tls.Config) (*Client, error) {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := tls.DialWithDialer(d, "tcp", addr, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{conn: conn, r: bufio.NewReader(conn)}, nil
+}
+
 // Close closes the connection.
 func (c *Client) Close() error { return c.conn.Close() }
 
@@ -39,15 +50,30 @@ func (c *Client) RemoteAddr() string { return c.conn.RemoteAddr().String() }
 // reply. The reply is one of: string, int64, nil, []any, or an error value
 // representing a RESP error.
 func (c *Client) Do(args ...string) (any, error) {
+	if err := c.writeCommand(args); err != nil {
+		return nil, err
+	}
+	return c.readReply()
+}
+
+// DoRaw sends a command and returns the typed RESP reply, preserving the
+// distinction between simple strings, bulk strings, integers, and arrays.
+// Used by the CLI to format replies the way redis-cli does.
+func (c *Client) DoRaw(args ...string) (resp.Value, error) {
+	if err := c.writeCommand(args); err != nil {
+		return resp.Value{}, err
+	}
+	return resp.ReadReply(c.r)
+}
+
+func (c *Client) writeCommand(args []string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "*%d\r\n", len(args))
 	for _, a := range args {
 		fmt.Fprintf(&b, "$%d\r\n%s\r\n", len(a), a)
 	}
-	if _, err := c.conn.Write([]byte(b.String())); err != nil {
-		return nil, err
-	}
-	return c.readReply()
+	_, err := c.conn.Write([]byte(b.String()))
+	return err
 }
 
 // ReadReply reads one server-pushed reply without sending a command — used
