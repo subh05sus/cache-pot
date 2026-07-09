@@ -6,6 +6,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--pad);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), 0 6px 16px rgba(0, 0, 0, 0.12);
 }
 .panel h2 {
   font-size: var(--fs-xs);
@@ -25,9 +26,12 @@
 .tile {
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
   border-radius: var(--radius);
   padding: 12px 14px;
+  transition: border-top-color 0.15s ease;
 }
+.tile:hover { border-top-color: var(--accent-dim); }
 .tile .label {
   font-size: var(--fs-xs);
   color: var(--muted);
@@ -35,9 +39,10 @@
   letter-spacing: 0.08em;
 }
 .tile .value {
+  font-family: var(--font-display);
   font-size: var(--fs-xl);
-  font-weight: 300;
-  margin-top: 2px;
+  font-weight: 600;
+  margin-top: 3px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -99,10 +104,11 @@ button, .btn {
   font-family: inherit;
   font-size: var(--fs-sm);
   cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 button:hover { border-color: var(--accent-dim); color: var(--text); }
-button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
-button.primary:hover { background: var(--accent-strong); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg-inset); font-weight: 600; }
+button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 button.danger { border-color: var(--err); color: var(--err); background: transparent; }
 button.danger:hover { background: var(--err-wash); }
 button.ghost { background: transparent; border-color: transparent; color: var(--muted); }

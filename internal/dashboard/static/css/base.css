@@ -42,13 +42,31 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--bg-inset);
-  padding: 18px 0 12px;
+  padding: 3px 0 12px;
+  position: relative;
+}
+/* kiln-glow: the one signature accent, fired along the console's spine */
+.sidebar::before {
+  content: "";
+  display: block;
+  height: 2px;
+  margin-bottom: 15px;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent) 45%, var(--accent-strong) 70%, transparent);
 }
 
-.brand { padding: 0 18px 18px; border-bottom: 1px solid var(--border); }
-.brand-mark { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.02em; display: block; }
+.brand { padding: 0 18px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
+.brand-pot { color: var(--accent); font-size: 15px; flex: none; }
+.brand-text { display: block; min-width: 0; }
+.brand-mark {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  display: block;
+  color: var(--text);
+}
 .brand-dot { color: var(--accent); }
-.brand-sub { font-size: var(--fs-xs); color: var(--faint); text-transform: uppercase; letter-spacing: 0.14em; }
+.brand-sub { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.16em; }
 
 .nav { list-style: none; margin: 10px 0 0; padding: 0; flex: 1; }
 .nav a {
@@ -97,9 +115,16 @@ a:hover { text-decoration: underline; }
 
 /* page header: the console prompt is the app's signature — every page
    announces itself the way a shell would */
-.page-head { display: flex; align-items: baseline; gap: 14px; margin: 0 0 20px; }
-.page-head h1 { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
-.page-head h1::before { content: "❯ "; color: var(--accent); }
+.page-head { display: flex; align-items: baseline; gap: 14px; margin: 0 0 22px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.page-head h1 {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+  text-transform: capitalize;
+}
+.page-head h1::before { content: ""; }
 .page-head .hint { color: var(--faint); font-size: var(--fs-xs); }
 .page-head .spacer { flex: 1; }
 
