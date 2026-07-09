@@ -28,10 +28,25 @@ import (
 )
 
 func main() {
-	// Subcommand dispatch: "cache-pot mcp ..." runs the MCP bridge.
+	// Subcommand dispatch: "cache-pot mcp ..." runs the MCP bridge,
+	// "cache-pot cli ..." opens the interactive RESP shell.
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		if err := runMCP(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "cache-pot mcp: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "cli" {
+		if err := runCLI(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "cache-pot cli: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "bench" {
+		if err := runBench(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "cache-pot bench: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -46,6 +61,8 @@ func runServer(argv []string) error {
 	fs := flag.NewFlagSet("cache-pot", flag.ExitOnError)
 	addr := fs.String("addr", env("CACHEPOT_ADDR", ":6379"), "TCP listen address (host:port)")
 	password := fs.String("auth", env("CACHEPOT_AUTH", ""), "require this AUTH password ('' disables auth)")
+	tlsCert := fs.String("tls-cert", env("CACHEPOT_TLS_CERT", ""), "PEM certificate path (enables TLS with --tls-key)")
+	tlsKey := fs.String("tls-key", env("CACHEPOT_TLS_KEY", ""), "PEM private-key path")
 	snapPath := fs.String("snapshot-path", env("CACHEPOT_SNAPSHOT_PATH", "cache-pot.snapshot"), "snapshot file path ('' disables persistence)")
 	snapInterval := fs.Duration("snapshot-interval", envDuration("CACHEPOT_SNAPSHOT_INTERVAL", 60*time.Second), "how often to snapshot to disk")
 	aofPath := fs.String("aof-path", env("CACHEPOT_AOF_PATH", ""), "append-only file path ('' disables AOF)")
@@ -103,9 +120,15 @@ func runServer(argv []string) error {
 
 	st.StartSweeper(ctx, *sweepInterval)
 
+	if (*tlsCert == "") != (*tlsKey == "") {
+		return fmt.Errorf("--tls-cert and --tls-key must be set together")
+	}
+
 	srv := server.New(st, server.Config{
 		Addr:        *addr,
 		Password:    *password,
+		TLSCert:     *tlsCert,
+		TLSKey:      *tlsKey,
 		Snapshotter: snap,
 		AOF:         aof,
 		Embed:       emb,

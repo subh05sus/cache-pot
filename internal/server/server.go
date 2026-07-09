@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -26,6 +27,8 @@ import (
 type Config struct {
 	Addr        string // listen address, e.g. ":6379"
 	Password    string // optional AUTH password ("" disables auth)
+	TLSCert     string // PEM certificate path; enables TLS when set with TLSKey
+	TLSKey      string // PEM private-key path
 	Snapshotter *persist.Snapshotter
 	AOF         *persist.AOF // optional append-only file (nil disables it)
 	Embed       *embed.Client
@@ -79,14 +82,27 @@ func (s *Server) Stats() *Stats { return s.stats }
 func (s *Server) Uptime() time.Duration { return time.Since(s.started) }
 
 // ListenAndServe binds the configured address and serves connections until ctx
-// is cancelled.
+// is cancelled. When TLSCert and TLSKey are set, the listener speaks TLS.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.cfg.Addr, err)
 	}
+	proto := "plaintext"
+	if s.cfg.TLSCert != "" || s.cfg.TLSKey != "" {
+		cert, err := tls.LoadX509KeyPair(s.cfg.TLSCert, s.cfg.TLSKey)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("load tls keypair: %w", err)
+		}
+		ln = tls.NewListener(ln, &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		})
+		proto = "TLS"
+	}
 	s.ln = ln
-	fmt.Printf("cache-pot: listening on %s\n", ln.Addr())
+	fmt.Printf("cache-pot: listening on %s (%s)\n", ln.Addr(), proto)
 
 	go func() {
 		<-ctx.Done()
