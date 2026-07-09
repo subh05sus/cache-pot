@@ -106,6 +106,27 @@ Already running an app on Redis? Aim it here — typically a single line changes
 export REDIS_URL=redis://localhost:6379
 ```
 
+### Or use the built-in shell
+
+No `redis-cli` handy? Cache-Pot ships its own. `cache-pot cli` opens an interactive RESP shell against a running server:
+
+```bash
+cache-pot cli
+localhost:6379> SET hello world
+OK
+localhost:6379> GET hello
+"world"
+```
+
+It also runs one-shot commands and reads piped scripts, so it drops into shell pipelines:
+
+```bash
+cache-pot cli PING
+echo "SET job:1 queued" | cache-pot cli
+```
+
+Connecting to a TLS server? Add `--tls` (and `--tls-cacert ca.pem`, or `--tls-insecure` for self-signed certs).
+
 ### Everyday commands
 
 Same shapes you know from Redis:
@@ -188,6 +209,30 @@ With Cache-Pot running, browse to http://localhost:8080 for a complete managemen
 
 Keys and values that aren't safe to print land as hex instead of getting mangled. Shut the console off with `--dashboard-addr ""`.
 
+## Benchmarking
+
+`cache-pot bench` is a built-in load generator, modeled on `redis-benchmark`. It fires a fixed number of requests across a pool of connections and reports throughput and latency percentiles per command:
+
+```bash
+cache-pot bench -n 100000 -c 50 -t SET,GET,INCR
+```
+
+```
+== SET ==
+  100000 requests in 2.410s
+  throughput : 41494 req/s
+  latency    : p50 0.550ms · p95 1.274ms · p99 1.817ms · max 5.065ms
+```
+
+Because it speaks plain RESP, you can point it at any Redis-compatible server — including real Redis — for a like-for-like comparison:
+
+```bash
+cache-pot bench --addr localhost:6379   # Cache-Pot
+cache-pot bench --addr localhost:6380   # Redis, same flags
+```
+
+Flags: `-n` total requests, `-c` connections, `-d` value size, `-t` tests (`PING,SET,GET,INCR,LPUSH,RPUSH,HSET,SADD`), `--keyspace` distinct keys, `-q` for one line per test.
+
 ## Cache-Pot vs Redis vs Valkey
 
 | | Cache-Pot | Redis | Valkey |
@@ -210,6 +255,8 @@ Each flag mirrors a `CACHEPOT_*` environment variable.
 |---|---|---|---|
 | `--addr` | `CACHEPOT_ADDR` | `:6379` | Port to listen on |
 | `--auth` | `CACHEPOT_AUTH` | empty | Require a password (empty means no password) |
+| `--tls-cert` | `CACHEPOT_TLS_CERT` | empty | PEM certificate path; set with `--tls-key` to serve over TLS |
+| `--tls-key` | `CACHEPOT_TLS_KEY` | empty | PEM private-key path |
 | `--snapshot-path` | `CACHEPOT_SNAPSHOT_PATH` | `cache-pot.snapshot` | Where to save data (empty turns saving off) |
 | `--snapshot-interval` | `CACHEPOT_SNAPSHOT_INTERVAL` | `60s` | How often to save to disk |
 | `--aof-path` | `CACHEPOT_AOF_PATH` | empty | Append-only file: log every write and replay on restart (empty turns it off) |
@@ -237,13 +284,26 @@ export CACHEPOT_EMBED_KEY=sk-your-key
 cache-pot
 ```
 
+### Serve over TLS
+
+Point Cache-Pot at a certificate and key to encrypt every client connection. Pass both flags together:
+
+```bash
+cache-pot --tls-cert cert.pem --tls-key key.pem
+```
+
+Existing Redis clients connect the same way, with TLS turned on (for example `redis-cli --tls --cacert cert.pem`).
+
 ## Roadmap
 
 - Shipped — core Redis commands: strings, hashes, lists, sets, sorted sets, expiry, pub/sub, snapshot saving.
 - Shipped — vector store, semantic cache, agent memory, MCP server, dashboard.
 - Shipped — append-only-file durability (`--aof-path`, crash-safe writes with `BGREWRITEAOF` compaction).
 - Shipped — transactions (`MULTI`/`EXEC`/`DISCARD`/`WATCH`) and incremental iteration (`SCAN`/`HSCAN`/`SSCAN`/`ZSCAN`).
-- On deck — replication, clustering, a faster vector index (HNSW).
+- Shipped — TLS-encrypted connections (`--tls-cert`, `--tls-key`).
+- Shipped — an interactive CLI (`cache-pot cli`) and a benchmark tool (`cache-pot bench`).
+- On deck — a faster vector index (HNSW).
+- Later — replication and clustering.
 
 ## Support the project
 

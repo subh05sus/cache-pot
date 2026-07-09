@@ -4,13 +4,13 @@ A 5-minute orientation for contributors. Cache-Pot is a single Go binary with no
 third-party dependencies; everything below lives under `internal/`.
 
 ```
-cmd/cache-pot            entrypoint: flag/env config, subcommands (serve, mcp),
-                     wiring, graceful shutdown
+cmd/cache-pot            entrypoint: flag/env config, subcommands (serve, mcp,
+                     cli, bench), wiring, graceful shutdown
 internal/
   resp               RESP2 reader + writer (the wire protocol)
-  client             tiny RESP2 client (used by the MCP bridge and tests)
+  client             tiny RESP2 client (MCP bridge, cli/bench subcommands, tests)
   store              the in-memory keyspace: sharded map, all data types, expiry
-  vector             flat cosine-similarity vector index
+  vector             cosine-similarity vector index: brute force small, HNSW large
   pubsub             PUBLISH/SUBSCRIBE channel registry
   embed              optional OpenAI-compatible embeddings client
   persist            snapshot save/load
